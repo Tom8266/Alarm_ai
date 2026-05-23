@@ -66,15 +66,15 @@ void DS3231_ReadAlarm(Alarm_TypeDef* Alarm,Alarm_Select Selected_Alarm){
     uint8_t Buf[4];
     if (Selected_Alarm==Alarm1) {
         DS3231_ReadData(Alarm1_Second_MemAddress, Buf, 4);
-        // 判断状态：所有掩码位全为1 = Disable
-        uint8_t all_masked = (Buf[0] & Buf[1] & Buf[2] & Buf[3]) & 0x80;
-        Alarm->State = all_masked ? Disable : Enable;
+        // A1M1=1(仅秒掩码) = Disable
+        uint8_t disabled = Buf[0] & 0x80;
+        Alarm->State = disabled ? Disable : Enable;
         for (uint8_t i=0; i<4; i++) {BCD_To_Dec(&Buf[i]);}
         Alarm->Second  = Buf[0] & 0x7F;
         Alarm->Minute  = Buf[1] & 0x7F;
         Alarm->Hour    = Buf[2] & 0x7F;
         // Buf[3]: bit7=A1M4, bit6=DY/DT, bits5-0=day/date
-        if (!all_masked) {
+        if (!disabled) {
             if (Buf[3] & 0x80) {
                 Alarm->Repeat = ALARM_DAILY;
                 Alarm->Day = 1;
@@ -89,13 +89,14 @@ void DS3231_ReadAlarm(Alarm_TypeDef* Alarm,Alarm_Select Selected_Alarm){
     }
     if (Selected_Alarm==Alarm2) {
         DS3231_ReadData(Alarm2_Minute_MemAddress, Buf, 3);
-        uint8_t all_masked = (Buf[0] & Buf[1] & Buf[2]) & 0x80;
-        Alarm->State = all_masked ? Disable : Enable;
+        // A2M2=1(仅分掩码) = Disable
+        uint8_t disabled = Buf[0] & 0x80;
+        Alarm->State = disabled ? Disable : Enable;
         for (uint8_t i=0; i<3; i++) {BCD_To_Dec(&Buf[i]);}
         Alarm->Second  = 0;
         Alarm->Minute  = Buf[0] & 0x7F;
         Alarm->Hour    = Buf[1] & 0x7F;
-        if (!all_masked) {
+        if (!disabled) {
             if (Buf[2] & 0x80) {
                 Alarm->Repeat = ALARM_DAILY;
                 Alarm->Day = 1;
@@ -113,37 +114,34 @@ void DS3231_ReadAlarm(Alarm_TypeDef* Alarm,Alarm_Select Selected_Alarm){
 void DS3231_WriteAlarm(Alarm_TypeDef* Alarm,Alarm_Select Selected_Alarm){
     if (Selected_Alarm==Alarm1) {
         uint8_t Buf[4];
+        Buf[0]=Alarm->Second & 0x7F;            // A1M1=0, match seconds
+        Buf[1]=Alarm->Minute & 0x7F;            // A1M2=0, match minutes
+        Buf[2]=Alarm->Hour   & 0x7F;            // A1M3=0, match hours
+        Buf[3]=Alarm->Day    & 0x3F;            // A1M4 and DY/DT set below
+        for (uint8_t i=0; i<4; i++) {Dec_To_BCD(&Buf[i]);}
+        switch (Alarm->Repeat) {
+            case ALARM_DAILY:   Buf[3] |= 0x80;           break; // A1M4=1
+            case ALARM_DATE:    /* DY/DT=0 by default */  break;
+            case ALARM_WEEKDAY: Buf[3] |= 0x40;           break; // DY/DT=1
+        }
         if (Alarm->State==Disable) {
-            // 全掩码 = 禁用
-            Buf[0]=0x80; Buf[1]=0x80; Buf[2]=0x80; Buf[3]=0x80;
-        } else {
-            Buf[0]=Alarm->Second & 0x7F;            // A1M1=0, match seconds
-            Buf[1]=Alarm->Minute & 0x7F;            // A1M2=0, match minutes
-            Buf[2]=Alarm->Hour   & 0x7F;            // A1M3=0, match hours
-            Buf[3]=Alarm->Day    & 0x3F;            // A1M4 and DY/DT set below
-            for (uint8_t i=0; i<4; i++) {Dec_To_BCD(&Buf[i]);}
-            switch (Alarm->Repeat) {
-                case ALARM_DAILY:   Buf[3] |= 0x80;           break; // A1M4=1
-                case ALARM_DATE:    /* DY/DT=0 by default */  break;
-                case ALARM_WEEKDAY: Buf[3] |= 0x40;           break; // DY/DT=1
-            }
+            Buf[0] |= 0x80;     // A1M1=1: ignore seconds, effectively disable
         }
         DS3231_WriteData(Alarm1_Second_MemAddress, Buf, 4);
     }
     if (Selected_Alarm==Alarm2) {
         uint8_t Buf[3];
+        Buf[0]=Alarm->Minute & 0x7F;            // A2M2=0, match minutes
+        Buf[1]=Alarm->Hour   & 0x7F;            // A2M3=0, match hours
+        Buf[2]=Alarm->Day    & 0x3F;
+        for (uint8_t i=0; i<3; i++) {Dec_To_BCD(&Buf[i]);}
+        switch (Alarm->Repeat) {
+            case ALARM_DAILY:   Buf[2] |= 0x80;           break;
+            case ALARM_DATE:    /* DY/DT=0 by default */  break;
+            case ALARM_WEEKDAY: Buf[2] |= 0x40;           break;
+        }
         if (Alarm->State==Disable) {
-            Buf[0]=0x80; Buf[1]=0x80; Buf[2]=0x80;
-        } else {
-            Buf[0]=Alarm->Minute & 0x7F;            // A2M2=0, match minutes
-            Buf[1]=Alarm->Hour   & 0x7F;            // A2M3=0, match hours
-            Buf[2]=Alarm->Day    & 0x3F;
-            for (uint8_t i=0; i<3; i++) {Dec_To_BCD(&Buf[i]);}
-            switch (Alarm->Repeat) {
-                case ALARM_DAILY:   Buf[2] |= 0x80;           break;
-                case ALARM_DATE:    /* DY/DT=0 by default */  break;
-                case ALARM_WEEKDAY: Buf[2] |= 0x40;           break;
-            }
+            Buf[0] |= 0x80;     // A2M2=1: ignore minutes, effectively disable
         }
         DS3231_WriteData(Alarm2_Minute_MemAddress, Buf, 3);
     }
