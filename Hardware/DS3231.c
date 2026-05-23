@@ -69,16 +69,18 @@ void DS3231_ReadAlarm(Alarm_TypeDef* Alarm,Alarm_Select Selected_Alarm){
         // A1M1=1(仅秒掩码) = Disable
         uint8_t disabled = Buf[0] & 0x80;
         Alarm->State = disabled ? Disable : Enable;
+        // 先解码 Buf[3] 的标志位，再做 BCD
+        uint8_t a1m4 = Buf[3] & 0x80;
+        uint8_t dydt = Buf[3] & 0x40;
         for (uint8_t i=0; i<4; i++) {BCD_To_Dec(&Buf[i]);}
         Alarm->Second  = Buf[0] & 0x7F;
         Alarm->Minute  = Buf[1] & 0x7F;
         Alarm->Hour    = Buf[2] & 0x7F;
-        // Buf[3]: bit7=A1M4, bit6=DY/DT, bits5-0=day/date
         if (!disabled) {
-            if (Buf[3] & 0x80) {
+            if (a1m4) {
                 Alarm->Repeat = ALARM_DAILY;
                 Alarm->Day = 1;
-            } else if (Buf[3] & 0x40) {
+            } else if (dydt) {
                 Alarm->Repeat = ALARM_WEEKDAY;
                 Alarm->Day = Buf[3] & 0x3F;
             } else {
@@ -92,15 +94,17 @@ void DS3231_ReadAlarm(Alarm_TypeDef* Alarm,Alarm_Select Selected_Alarm){
         // A2M2=1(仅分掩码) = Disable
         uint8_t disabled = Buf[0] & 0x80;
         Alarm->State = disabled ? Disable : Enable;
+        uint8_t a2m4 = Buf[2] & 0x80;
+        uint8_t dydt = Buf[2] & 0x40;
         for (uint8_t i=0; i<3; i++) {BCD_To_Dec(&Buf[i]);}
         Alarm->Second  = 0;
         Alarm->Minute  = Buf[0] & 0x7F;
         Alarm->Hour    = Buf[1] & 0x7F;
         if (!disabled) {
-            if (Buf[2] & 0x80) {
+            if (a2m4) {
                 Alarm->Repeat = ALARM_DAILY;
                 Alarm->Day = 1;
-            } else if (Buf[2] & 0x40) {
+            } else if (dydt) {
                 Alarm->Repeat = ALARM_WEEKDAY;
                 Alarm->Day = Buf[2] & 0x3F;
             } else {
