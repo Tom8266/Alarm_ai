@@ -140,8 +140,8 @@ static void Alarm_EnterEdit(uint8_t is_alarm1) {
 }
 
 static uint8_t Alarm_StepCount(void) {
-    // Hour + Minute + Repeat + Day(if not daily) + State
-    uint8_t n = 3; // Hour, Min, Repeat, State = 4? No: step 0=Hour,1=Min,2=Repeat,3=State,4=Day
+    // Hour + Minute + Repeat + State = 4 base, +Sec for Alarm1, +Day if non-Daily
+    uint8_t n = 4;
     if (alarm_is_alarm1) n++; // + Second
     if (alarm_buf.Repeat != ALARM_DAILY) n++; // + Day
     return n;
