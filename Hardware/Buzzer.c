@@ -5,15 +5,15 @@ static uint16_t alarm_counter = 0;
 static uint16_t alarm_duration = 0;
 
 void Buzzer_Init(void) {
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);
-}
-
-void Buzzer_On(void) {
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);
 }
 
-void Buzzer_Off(void) {
+void Buzzer_On(void) {
     HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);
+}
+
+void Buzzer_Off(void) {
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_RESET);
 }
 
 void Buzzer_Toggle(void) {
