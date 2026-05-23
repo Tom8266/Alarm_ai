@@ -165,6 +165,41 @@ static uint8_t Alarm_StepLabel(uint8_t step, const char** label) {
     return 0;
 }
 
+static void Alarm_StepChange(uint8_t step, uint8_t down) {
+    const char *label;
+    if (!Alarm_StepLabel(step, &label)) return;
+
+    switch (label[0]) {
+        case 'H': // Hour
+            if (down) { if (alarm_buf.Hour < 23) alarm_buf.Hour++; else alarm_buf.Hour = 0; }
+            else      { if (alarm_buf.Hour > 0) alarm_buf.Hour--; else alarm_buf.Hour = 23; }
+            break;
+        case 'M': // Min
+            if (down) { if (alarm_buf.Minute < 59) alarm_buf.Minute++; else alarm_buf.Minute = 0; }
+            else      { if (alarm_buf.Minute > 0) alarm_buf.Minute--; else alarm_buf.Minute = 59; }
+            break;
+        case 'S':
+            if (label[1] == 'e') { // Sec
+                if (down) { if (alarm_buf.Second < 59) alarm_buf.Second++; else alarm_buf.Second = 0; }
+                else      { if (alarm_buf.Second > 0) alarm_buf.Second--; else alarm_buf.Second = 59; }
+            } else { // State
+                alarm_buf.State = (alarm_buf.State == Enable) ? Disable : Enable;
+            }
+            break;
+        case 'R': // Repeat
+            if (down) { if (alarm_buf.Repeat < ALARM_WEEKDAY) alarm_buf.Repeat++; else alarm_buf.Repeat = ALARM_DAILY; }
+            else      { if (alarm_buf.Repeat > ALARM_DAILY) alarm_buf.Repeat--; else alarm_buf.Repeat = ALARM_WEEKDAY; }
+            break;
+        case 'D': // Day
+            {
+                uint8_t dmax = (alarm_buf.Repeat == ALARM_WEEKDAY) ? 7 : 31;
+                if (down) { if (alarm_buf.Day < dmax) alarm_buf.Day++; else alarm_buf.Day = 1; }
+                else      { if (alarm_buf.Day > 1) alarm_buf.Day--; else alarm_buf.Day = dmax; }
+            }
+            break;
+    }
+}
+
 // ========== 绘制函数 ==========
 
 static void Page_DrawMenu(void) {
@@ -374,66 +409,10 @@ static void Page_ProcessAlarmSet(void) {
     }
     uint8_t total = Alarm_StepCount();
     if (alarm_editing) {
-        if (Button_GetEvent(BTN_DOWN) == BTN_SHORT_PRESS) {
-            switch (alarm_step) {
-                case 0: if (alarm_buf.Hour < 23)   alarm_buf.Hour++; else alarm_buf.Hour = 0; break;
-                case 1: if (alarm_buf.Minute < 59) alarm_buf.Minute++; else alarm_buf.Minute = 0; break;
-                case 2: if (alarm_is_alarm1) {
-                            if (alarm_buf.Second < 59) alarm_buf.Second++; else alarm_buf.Second = 0;
-                        } break;
-                case 3: // Repeat (position depends on whether Sec exists)
-                {
-                    uint8_t r_step = alarm_is_alarm1 ? 3 : 2;
-                    if (alarm_step == r_step) {
-                        if (alarm_buf.Repeat < ALARM_WEEKDAY) alarm_buf.Repeat++;
-                        else alarm_buf.Repeat = ALARM_DAILY;
-                    }
-                    break;
-                }
-                case 4:
-                case 5: // State or Day
-                {
-                    uint8_t state_step = total - 1;
-                    if (alarm_step == state_step) {
-                        alarm_buf.State = (alarm_buf.State == Enable) ? Disable : Enable;
-                    } else {
-                        // Day
-                        uint8_t dmax = (alarm_buf.Repeat == ALARM_WEEKDAY) ? 7 : 31;
-                        uint8_t dmin = 1;
-                        if (alarm_buf.Day < dmax) alarm_buf.Day++; else alarm_buf.Day = dmin;
-                    }
-                    break;
-                }
-            }
-        }
-        if (Button_GetEvent(BTN_UP) == BTN_SHORT_PRESS) {
-            switch (alarm_step) {
-                case 0: if (alarm_buf.Hour > 0)   alarm_buf.Hour--; else alarm_buf.Hour = 23; break;
-                case 1: if (alarm_buf.Minute > 0) alarm_buf.Minute--; else alarm_buf.Minute = 59; break;
-                case 2: if (alarm_is_alarm1) {
-                            if (alarm_buf.Second > 0) alarm_buf.Second--; else alarm_buf.Second = 59;
-                        } break;
-                case 3: {
-                    uint8_t r_step = alarm_is_alarm1 ? 3 : 2;
-                    if (alarm_step == r_step) {
-                        if (alarm_buf.Repeat > ALARM_DAILY) alarm_buf.Repeat--;
-                        else alarm_buf.Repeat = ALARM_WEEKDAY;
-                    }
-                    break;
-                }
-                case 4:
-                case 5: {
-                    uint8_t state_step = total - 1;
-                    if (alarm_step == state_step) {
-                        alarm_buf.State = (alarm_buf.State == Enable) ? Disable : Enable;
-                    } else {
-                        uint8_t dmax = (alarm_buf.Repeat == ALARM_WEEKDAY) ? 7 : 31;
-                        if (alarm_buf.Day > 1) alarm_buf.Day--; else alarm_buf.Day = dmax;
-                    }
-                    break;
-                }
-            }
-        }
+        if (Button_GetEvent(BTN_DOWN) == BTN_SHORT_PRESS)
+            Alarm_StepChange(alarm_step, 1);
+        if (Button_GetEvent(BTN_UP) == BTN_SHORT_PRESS)
+            Alarm_StepChange(alarm_step, 0);
     } else {
         if (Button_GetEvent(BTN_UP) == BTN_SHORT_PRESS) {
             if (alarm_step > 0) alarm_step--;
