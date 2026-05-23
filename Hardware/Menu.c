@@ -272,13 +272,13 @@ static void Page_DrawAlarmSet_Common(void) {
             n_draw = 255; // already drawn
         }
 
-        if (n_draw != 255 && label[0] != 'R' && label[0] != 'S') {
+        if (n_draw != 255 && label[0] != 'R' && !(label[0] == 'S' && label[1] == 't')) {
             SSD1315_ShowNumber(64, y, n_draw, 1, White);
         } else if (label[0] == 'R') {
             // Repeat
             const char *rn[] = {"Daily", "Date", "Weekday"};
             SSD1315_ShowString(64, y, rn[alarm_buf.Repeat], 1, White);
-        } else if (label[0] == 'S') {
+        } else if (label[0] == 'S' && label[1] == 't') {
             // State
             SSD1315_ShowString(64, y, alarm_buf.State == Enable ? "ON" : "OFF", 1, White);
         }
