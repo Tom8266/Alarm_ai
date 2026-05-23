@@ -79,7 +79,9 @@ static uint8_t  alarm_list_sel   = 0;  // 闹钟列表光标
 static uint8_t  alarm_step       = 0;  // 编辑项光标
 static uint8_t  alarm_editing    = 0;  // 0=浏览, 1=编辑中
 static uint8_t  alarm_is_alarm1  = 1;  // 当前编辑的是 Alarm1 还是 Alarm2
-static Alarm_TypeDef alarm_buf;
+static Alarm_TypeDef alarm_buf[2]; // [0]=Alarm1, [1]=Alarm2
+
+static Alarm_TypeDef* AB(void) { return &alarm_buf[alarm_is_alarm1 ? 0 : 1]; }
 
 // ---- 时间设置 ----
 static uint8_t time_set_step = 0;
@@ -134,7 +136,7 @@ Page_ID Page_Get(void) {
 // ========== 辅助：进入闹钟编辑页 ==========
 static void Alarm_EnterEdit(uint8_t is_alarm1) {
     alarm_is_alarm1 = is_alarm1;
-    DS3231_ReadAlarm(&alarm_buf, is_alarm1 ? Alarm1 : Alarm2);
+    DS3231_ReadAlarm(AB(), is_alarm1 ? Alarm1 : Alarm2);
     alarm_step = 0;
     alarm_editing = 0;
 }
@@ -143,7 +145,7 @@ static uint8_t Alarm_StepCount(void) {
     // Hour + Minute + Repeat + State = 4 base, +Sec for Alarm1, +Day if non-Daily
     uint8_t n = 4;
     if (alarm_is_alarm1) n++; // + Second
-    if (alarm_buf.Repeat != ALARM_DAILY) n++; // + Day
+    if (AB()->Repeat != ALARM_DAILY) n++; // + Day
     return n;
 }
 
@@ -153,13 +155,13 @@ static uint8_t Alarm_StepLabel(uint8_t step, const char** label) {
         if (step == 1) { *label = "Min";    return 1; }
         if (step == 2) { *label = "Sec";    return 1; }
         if (step == 3) { *label = "Repeat"; return 1; }
-        if (alarm_buf.Repeat != ALARM_DAILY && step == 4) { *label = "Day"; return 1; }
+        if (AB()->Repeat != ALARM_DAILY && step == 4) { *label = "Day"; return 1; }
         if (step == Alarm_StepCount() - 1) { *label = "State"; return 1; }
     } else {
         if (step == 0) { *label = "Hour";   return 1; }
         if (step == 1) { *label = "Min";    return 1; }
         if (step == 2) { *label = "Repeat"; return 1; }
-        if (alarm_buf.Repeat != ALARM_DAILY && step == 3) { *label = "Day"; return 1; }
+        if (AB()->Repeat != ALARM_DAILY && step == 3) { *label = "Day"; return 1; }
         if (step == Alarm_StepCount() - 1) { *label = "State"; return 1; }
     }
     return 0;
@@ -171,30 +173,30 @@ static void Alarm_StepChange(uint8_t step, uint8_t down) {
 
     switch (label[0]) {
         case 'H': // Hour
-            if (down) { if (alarm_buf.Hour < 23) alarm_buf.Hour++; else alarm_buf.Hour = 0; }
-            else      { if (alarm_buf.Hour > 0) alarm_buf.Hour--; else alarm_buf.Hour = 23; }
+            if (down) { if (AB()->Hour < 23) AB()->Hour++; else AB()->Hour = 0; }
+            else      { if (AB()->Hour > 0) AB()->Hour--; else AB()->Hour = 23; }
             break;
         case 'M': // Min
-            if (down) { if (alarm_buf.Minute < 59) alarm_buf.Minute++; else alarm_buf.Minute = 0; }
-            else      { if (alarm_buf.Minute > 0) alarm_buf.Minute--; else alarm_buf.Minute = 59; }
+            if (down) { if (AB()->Minute < 59) AB()->Minute++; else AB()->Minute = 0; }
+            else      { if (AB()->Minute > 0) AB()->Minute--; else AB()->Minute = 59; }
             break;
         case 'S':
             if (label[1] == 'e') { // Sec
-                if (down) { if (alarm_buf.Second < 59) alarm_buf.Second++; else alarm_buf.Second = 0; }
-                else      { if (alarm_buf.Second > 0) alarm_buf.Second--; else alarm_buf.Second = 59; }
+                if (down) { if (AB()->Second < 59) AB()->Second++; else AB()->Second = 0; }
+                else      { if (AB()->Second > 0) AB()->Second--; else AB()->Second = 59; }
             } else { // State
-                alarm_buf.State = (alarm_buf.State == Enable) ? Disable : Enable;
+                AB()->State = (AB()->State == Enable) ? Disable : Enable;
             }
             break;
         case 'R': // Repeat
-            if (down) { if (alarm_buf.Repeat < ALARM_WEEKDAY) alarm_buf.Repeat++; else alarm_buf.Repeat = ALARM_DAILY; }
-            else      { if (alarm_buf.Repeat > ALARM_DAILY) alarm_buf.Repeat--; else alarm_buf.Repeat = ALARM_WEEKDAY; }
+            if (down) { if (AB()->Repeat < ALARM_WEEKDAY) AB()->Repeat++; else AB()->Repeat = ALARM_DAILY; }
+            else      { if (AB()->Repeat > ALARM_DAILY) AB()->Repeat--; else AB()->Repeat = ALARM_WEEKDAY; }
             break;
         case 'D': // Day
             {
-                uint8_t dmax = (alarm_buf.Repeat == ALARM_WEEKDAY) ? 7 : 31;
-                if (down) { if (alarm_buf.Day < dmax) alarm_buf.Day++; else alarm_buf.Day = 1; }
-                else      { if (alarm_buf.Day > 1) alarm_buf.Day--; else alarm_buf.Day = dmax; }
+                uint8_t dmax = (AB()->Repeat == ALARM_WEEKDAY) ? 7 : 31;
+                if (down) { if (AB()->Day < dmax) AB()->Day++; else AB()->Day = 1; }
+                else      { if (AB()->Day > 1) AB()->Day--; else AB()->Day = dmax; }
             }
             break;
     }
@@ -256,18 +258,18 @@ static void Page_DrawAlarmSet_Common(void) {
 
         uint8_t n_draw = 0;
 
-        if (step == 0)      { n_draw = alarm_buf.Hour;   }  // Hour
-        else if (step == 1) { n_draw = alarm_buf.Minute; }  // Min
-        else if (step == 2 && alarm_is_alarm1) { n_draw = alarm_buf.Second; } // Sec
-        else if (step == ((alarm_is_alarm1 && alarm_buf.Repeat != ALARM_DAILY) ? 4 : 3) &&
-                 alarm_buf.Repeat != ALARM_DAILY) {
+        if (step == 0)      { n_draw = AB()->Hour;   }  // Hour
+        else if (step == 1) { n_draw = AB()->Minute; }  // Min
+        else if (step == 2 && alarm_is_alarm1) { n_draw = AB()->Second; } // Sec
+        else if (step == ((alarm_is_alarm1 && AB()->Repeat != ALARM_DAILY) ? 4 : 3) &&
+                 AB()->Repeat != ALARM_DAILY) {
             // Day
-            if (alarm_buf.Repeat == ALARM_WEEKDAY) {
+            if (AB()->Repeat == ALARM_WEEKDAY) {
                 const char *dn[] = {"", "Mon","Tue","Wed","Thu","Fri","Sat","Sun"};
-                uint8_t d = (alarm_buf.Day >= 1 && alarm_buf.Day <= 7) ? alarm_buf.Day : 1;
+                uint8_t d = (AB()->Day >= 1 && AB()->Day <= 7) ? AB()->Day : 1;
                 SSD1315_ShowString(64, y, dn[d], 1, White);
             } else {
-                SSD1315_ShowNumber(64, y, alarm_buf.Day, 1, White);
+                SSD1315_ShowNumber(64, y, AB()->Day, 1, White);
             }
             n_draw = 255; // already drawn
         }
@@ -277,10 +279,10 @@ static void Page_DrawAlarmSet_Common(void) {
         } else if (label[0] == 'R') {
             // Repeat
             const char *rn[] = {"Daily", "Date", "Weekday"};
-            SSD1315_ShowString(64, y, rn[alarm_buf.Repeat], 1, White);
+            SSD1315_ShowString(64, y, rn[AB()->Repeat], 1, White);
         } else if (label[0] == 'S' && label[1] == 't') {
             // State
-            SSD1315_ShowString(64, y, alarm_buf.State == Enable ? "ON" : "OFF", 1, White);
+            SSD1315_ShowString(64, y, AB()->State == Enable ? "ON" : "OFF", 1, White);
         }
 
         // 高亮/光标
@@ -399,7 +401,7 @@ static void Page_ProcessAlarmList(void) {
 
 static void Page_ProcessAlarmSet(void) {
     if (Button_GetEvent(BTN_LEFT) == BTN_SHORT_PRESS) {
-        DS3231_WriteAlarm(&alarm_buf, alarm_is_alarm1 ? Alarm1 : Alarm2);
+        DS3231_WriteAlarm(AB(), alarm_is_alarm1 ? Alarm1 : Alarm2);
         Page_Set(PAGE_ALARM_LIST);
         return;
     }
