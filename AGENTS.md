@@ -110,7 +110,7 @@ Defined in `Core/Inc/gpio.h` (USER CODE section):
 | Pin  | Symbol            | Function         | Config                     |
 |------|-------------------|------------------|----------------------------|
 | PA0  | `BUTTON_UP`       | Button UP        | Pull-up input, EXTI fall   |
-| PA1  | —                 | Buzzer           | Push-pull output (HIGH=on) |
+| PB0  | —                 | Buzzer           | Push-pull output (LOW=on)  |
 | PA2  | `BUTTON_DOWN`     | Button DOWN      | Pull-up input, EXTI fall   |
 | PA4  | `BUTTON_LEFT`     | Button LEFT      | Pull-up input, EXTI fall   |
 | PA6  | `BUTTON_RIGHT`    | Button RIGHT     | Pull-up input, EXTI fall   |
@@ -164,7 +164,7 @@ Defined in `Core/Inc/gpio.h` (USER CODE section):
 
 ### Buzzer Driver (`Hardware/Buzzer.c`)
 
-- Active buzzer on PA1: `HAL_GPIO_WritePin` HIGH=on, LOW=off.
+- Active buzzer on PB0: `HAL_GPIO_WritePin` LOW=on, HIGH=off (needs external transistor for current).
 - `Buzzer_StartAlarm(duration_ms)` starts buzzing and arms an auto-shutoff timer.
 - `Buzzer_TimerHandler()` (10ms) decrements the counter; when expired, turns off buzzer.
 - **Timer handler runs even during sleep** — so alarm auto-shutoff works during RINGING state.
