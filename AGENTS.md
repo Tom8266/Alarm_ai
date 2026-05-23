@@ -101,6 +101,8 @@ Each page has a handler pair: `Page_Draw*()` + `Page_Process*()` dispatched via 
 
 Appearance settings (`bar_style`, `home_style`) are saved to the **last flash page at `0x0800FC00`** (1024-byte page). A magic number `0xA55A` validates the data. Config is loaded at boot via `Settings_Load()` and written on change via `Settings_Save()` (erases page, programs two halfwords). The `CFG_MAGIC` sits at offset 0; bar style at offset 2, home style at offset 3.
 
+The **slogan** is not stored — it is computed from the DS3231 time at boot and on sleep wake via a simple hash (`Year×366 + Month×31 + Date + Hour×3600 + Minute×60 + Second`), modulo 10 to pick from 10 preset geek slogans. This requires zero Flash storage and naturally cycles as time advances.
+
 ### Pin Assignments
 
 Defined in `Core/Inc/gpio.h` (USER CODE section):
