@@ -66,17 +66,18 @@ void DS3231_ReadAlarm(Alarm_TypeDef* Alarm,Alarm_Select Selected_Alarm){
     uint8_t Buf[4];
     if (Selected_Alarm==Alarm1) {
         DS3231_ReadData(Alarm1_Second_MemAddress, Buf, 4);
-        // A1M1=1(仅秒掩码) = Disable
-        uint8_t disabled = Buf[0] & 0x80;
-        Alarm->State = disabled ? Disable : Enable;
-        // 先解码 Buf[3] 的标志位，再做 BCD
+        // 从控制寄存器 A1IE 读取状态
+        uint8_t ctrl[1];
+        DS3231_ReadData(Control_MemAddress, ctrl, 1);
+        Alarm->State = (ctrl[0] & 0x01) ? Enable : Disable;
+        // BCD 前取标志位
         uint8_t a1m4 = Buf[3] & 0x80;
         uint8_t dydt = Buf[3] & 0x40;
         for (uint8_t i=0; i<4; i++) {BCD_To_Dec(&Buf[i]);}
         Alarm->Second  = Buf[0] & 0x7F;
         Alarm->Minute  = Buf[1] & 0x7F;
         Alarm->Hour    = Buf[2] & 0x7F;
-        if (!disabled) {
+        if (Alarm->State == Enable) {
             if (a1m4) {
                 Alarm->Repeat = ALARM_DAILY;
                 Alarm->Day = 1;
@@ -91,16 +92,16 @@ void DS3231_ReadAlarm(Alarm_TypeDef* Alarm,Alarm_Select Selected_Alarm){
     }
     if (Selected_Alarm==Alarm2) {
         DS3231_ReadData(Alarm2_Minute_MemAddress, Buf, 3);
-        // A2M2=1(仅分掩码) = Disable
-        uint8_t disabled = Buf[0] & 0x80;
-        Alarm->State = disabled ? Disable : Enable;
+        uint8_t ctrl[1];
+        DS3231_ReadData(Control_MemAddress, ctrl, 1);
+        Alarm->State = (ctrl[0] & 0x02) ? Enable : Disable;
         uint8_t a2m4 = Buf[2] & 0x80;
         uint8_t dydt = Buf[2] & 0x40;
         for (uint8_t i=0; i<3; i++) {BCD_To_Dec(&Buf[i]);}
         Alarm->Second  = 0;
         Alarm->Minute  = Buf[0] & 0x7F;
         Alarm->Hour    = Buf[1] & 0x7F;
-        if (!disabled) {
+        if (Alarm->State == Enable) {
             if (a2m4) {
                 Alarm->Repeat = ALARM_DAILY;
                 Alarm->Day = 1;
@@ -128,9 +129,12 @@ void DS3231_WriteAlarm(Alarm_TypeDef* Alarm,Alarm_Select Selected_Alarm){
             case ALARM_DATE:    /* DY/DT=0 by default */  break;
             case ALARM_WEEKDAY: Buf[3] |= 0x40;           break; // DY/DT=1
         }
-        if (Alarm->State==Disable) {
-            Buf[0] |= 0x80;     // A1M1=1: ignore seconds, effectively disable
-        }
+        // 通过控制寄存器 A1IE 位开关闹钟
+        uint8_t ctrl[1];
+        DS3231_ReadData(Control_MemAddress, ctrl, 1);
+        if (Alarm->State==Disable) ctrl[0] &= ~0x01; // A1IE=0
+        else                        ctrl[0] |=  0x01; // A1IE=1
+        DS3231_WriteData(Control_MemAddress, ctrl, 1);
         DS3231_WriteData(Alarm1_Second_MemAddress, Buf, 4);
     }
     if (Selected_Alarm==Alarm2) {
@@ -144,9 +148,11 @@ void DS3231_WriteAlarm(Alarm_TypeDef* Alarm,Alarm_Select Selected_Alarm){
             case ALARM_DATE:    /* DY/DT=0 by default */  break;
             case ALARM_WEEKDAY: Buf[2] |= 0x40;           break;
         }
-        if (Alarm->State==Disable) {
-            Buf[0] |= 0x80;     // A2M2=1: ignore minutes, effectively disable
-        }
+        uint8_t ctrl[1];
+        DS3231_ReadData(Control_MemAddress, ctrl, 1);
+        if (Alarm->State==Disable) ctrl[0] &= ~0x02; // A2IE=0
+        else                        ctrl[0] |=  0x02; // A2IE=1
+        DS3231_WriteData(Control_MemAddress, ctrl, 1);
         DS3231_WriteData(Alarm2_Minute_MemAddress, Buf, 3);
     }
 }
