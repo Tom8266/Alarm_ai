@@ -8,6 +8,20 @@
 #include "Font.h"
 
 Appearance_Settings appearance = {.bar_style = BAR_STYLE_BAR, .home_style = HOME_STYLE_CLOCK};
+uint8_t current_slogan = 0;
+
+const char* Slogans[] = {
+    "Nothing is impossible",
+    "No place like ~",
+    "chmod +x life",
+    "Reality segfault",
+    "In git we trust",
+    "404 sleep not found",
+    "Hack the planet!",
+    "The cake is a lie",
+    "Segfault, core dumped",
+    "sudo apt-get happy"
+};
 
 // ====== 配置持久化 (内部 Flash，最后一页) ======
 #define CFG_FLASH_ADDR  0x0800FC00
@@ -45,6 +59,12 @@ static void Settings_Save(void) {
 
 void Menu_Init(void) {
     Settings_Load();
+    // 用 DS3231 时间算标语哈希，零存储
+    Time_TypeDef t;
+    DS3231_ReadTime(&t);
+    uint16_t hash = t.Year * 366u + t.Month * 31u + t.Date
+                  + t.Hour * 3600u + t.Minute * 60u + t.Second;
+    current_slogan = hash % SLOGAN_COUNT;
 }
 
 static Page_ID current_page = PAGE_HOME;

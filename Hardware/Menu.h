@@ -35,6 +35,9 @@ typedef struct {
 } Appearance_Settings;
 
 extern Appearance_Settings appearance;
+extern const char* Slogans[];
+#define SLOGAN_COUNT 10
+extern uint8_t current_slogan;
 
 void Page_Set(Page_ID page);
 Page_ID Page_Get(void);

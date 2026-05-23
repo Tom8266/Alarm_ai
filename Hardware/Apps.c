@@ -2,6 +2,7 @@
 #include "DS3231.h"
 #include "Buzzer.h"
 #include "Font.h"
+#include "Menu.h"
 #include <stdint.h>
 
 volatile uint8_t Alarm_Triggered = 0;
@@ -15,7 +16,7 @@ void App_Home(void){
     SSD1315_ShowNumber(63,1,Time.Year,2,White);
     SSD1315_ShowNumber(87,1,Time.Month,2,White);
     SSD1315_ShowNumber(111,1,Time.Date,2,White);
-    SSD1315_ShowString(2, 54, "Nothing is impossible", 1, White);
+    SSD1315_ShowString(2, 54, Slogans[current_slogan], 1, White);
     Font_Draw7SegTime(&Time, 18, 19);
     SSD1315_ShowString(2, 1, Days[Time.WeekDay - 1], 2, White);
 }
