@@ -74,15 +74,17 @@ void DS3231_ReadAlarm(Alarm_TypeDef* Alarm,Alarm_Select Selected_Alarm){
         Alarm->Minute  = Buf[1] & 0x7F;
         Alarm->Hour    = Buf[2] & 0x7F;
         // Buf[3]: bit7=A1M4, bit6=DY/DT, bits5-0=day/date
-        if (Buf[3] & 0x80) {
-            Alarm->Repeat = ALARM_DAILY;
-            Alarm->Day = 1;
-        } else if (Buf[3] & 0x40) {
-            Alarm->Repeat = ALARM_WEEKDAY;
-            Alarm->Day = Buf[3] & 0x3F;
-        } else {
-            Alarm->Repeat = ALARM_DATE;
-            Alarm->Day = Buf[3] & 0x3F;
+        if (!all_masked) {
+            if (Buf[3] & 0x80) {
+                Alarm->Repeat = ALARM_DAILY;
+                Alarm->Day = 1;
+            } else if (Buf[3] & 0x40) {
+                Alarm->Repeat = ALARM_WEEKDAY;
+                Alarm->Day = Buf[3] & 0x3F;
+            } else {
+                Alarm->Repeat = ALARM_DATE;
+                Alarm->Day = Buf[3] & 0x3F;
+            }
         }
     }
     if (Selected_Alarm==Alarm2) {
@@ -93,15 +95,17 @@ void DS3231_ReadAlarm(Alarm_TypeDef* Alarm,Alarm_Select Selected_Alarm){
         Alarm->Second  = 0;
         Alarm->Minute  = Buf[0] & 0x7F;
         Alarm->Hour    = Buf[1] & 0x7F;
-        if (Buf[2] & 0x80) {
-            Alarm->Repeat = ALARM_DAILY;
-            Alarm->Day = 1;
-        } else if (Buf[2] & 0x40) {
-            Alarm->Repeat = ALARM_WEEKDAY;
-            Alarm->Day = Buf[2] & 0x3F;
-        } else {
-            Alarm->Repeat = ALARM_DATE;
-            Alarm->Day = Buf[2] & 0x3F;
+        if (!all_masked) {
+            if (Buf[2] & 0x80) {
+                Alarm->Repeat = ALARM_DAILY;
+                Alarm->Day = 1;
+            } else if (Buf[2] & 0x40) {
+                Alarm->Repeat = ALARM_WEEKDAY;
+                Alarm->Day = Buf[2] & 0x3F;
+            } else {
+                Alarm->Repeat = ALARM_DATE;
+                Alarm->Day = Buf[2] & 0x3F;
+            }
         }
     }
 }
