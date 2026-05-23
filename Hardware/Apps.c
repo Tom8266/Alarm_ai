@@ -1,6 +1,5 @@
 #include "OLED.h"
 #include "DS3231.h"
-#include "Buzzer.h"
 #include "Font.h"
 #include "Menu.h"
 #include <stdint.h>
