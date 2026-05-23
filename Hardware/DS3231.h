@@ -46,7 +46,5 @@ void DS3231_ReadAlarm(Alarm_TypeDef* Alarm, Alarm_Select Selected_Alarm);
 void DS3231_WriteAlarm(Alarm_TypeDef* Alarm, Alarm_Select Selected_Alarm);
 void DS3231_ReadTemperature(float* Temperature);
 void DS3231_ClearAlarmFlag(void);
-void DS3231_WriteRAM(uint8_t addr, uint8_t* pData, uint8_t size);
-void DS3231_ReadRAM(uint8_t addr, uint8_t* pData, uint8_t size);
 
 #endif

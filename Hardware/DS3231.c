@@ -9,8 +9,7 @@
 #define Second_MemAddress                     0x00
 #define Alarm1_Second_MemAddress        0x07
 #define Alarm2_Minute_MemAddress         0x0B
-#define Temperature_High_MemAddress    0x11
-#define SRAM_MemAddress                0x14        
+#define Temperature_High_MemAddress    0x11        
 
 void BCD_To_Dec(uint8_t* BCD){
     *BCD=(*BCD>>4)*10+(*BCD&0x0F);
@@ -158,12 +157,4 @@ void DS3231_ClearAlarmFlag(void){
     DS3231_ReadData(Status_MemAddress, Buf, 1);
     Buf[0]&=~0x03;                                                //clear the alarm flag
     DS3231_WriteData(Status_MemAddress, Buf,1);
-}
-
-void DS3231_WriteRAM(uint8_t addr, uint8_t* pData, uint8_t size){
-    DS3231_WriteData(SRAM_MemAddress + addr, pData, size);
-}
-
-void DS3231_ReadRAM(uint8_t addr, uint8_t* pData, uint8_t size){
-    DS3231_ReadData(SRAM_MemAddress + addr, pData, size);
 }
