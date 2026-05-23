@@ -1,5 +1,7 @@
 #include "Sleep.h"
 #include "OLED.h"
+#include "Menu.h"
+#include "DS3231.h"
 #include "stm32f1xx_hal.h"
 
 #define IDLE_TIMEOUT_MS  30000   // 30s 无操作休眠
@@ -40,6 +42,12 @@ void Sleep_WakeUp(void) {
     idle_counter = 0;
     SSD1315_WriteCommand(0xAF);  // 开启 OLED 显示
     SSD1315_Init();
+    // 唤醒换标语
+    Time_TypeDef t;
+    DS3231_ReadTime(&t);
+    uint16_t hash = t.Year * 366u + t.Month * 31u + t.Date
+                  + t.Hour * 3600u + t.Minute * 60u + t.Second;
+    current_slogan = hash % SLOGAN_COUNT;
 }
 
 uint8_t Sleep_IsActive(void) {
