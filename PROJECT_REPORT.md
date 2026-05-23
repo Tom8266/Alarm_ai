@@ -4,7 +4,7 @@
 
 基于 STM32F103C8T6 的智能闹钟固件。128×64 OLED 显示屏，DS3231 高精度 RTC 模块，4 键交互，有源蜂鸣器。
 
-**代码规模**：16 个自定义源文件，2339 行 C 代码。Flash 占用 24.2 KB（37%），RAM 占用 3.9 KB（19%）。
+**代码规模**：16 个自定义源文件，2339 行 C 代码。Flash 占用 24.2 KB（37.0%），RAM 占用 3.9 KB（19.0%）。
 
 ---
 
@@ -53,17 +53,17 @@
 
 | 路径 | 行数 | 说明 |
 |------|------|------|
-| `Hardware/Menu.c/h` | 610 | 页面状态机、菜单系统、个性化设置 |
-| `Hardware/OLED.c/h` | 473 | SSD1315 显示驱动，双缓冲渲染 |
-| `Hardware/DS3231.c/h` | 221 | RTC 驱动，BCD 编解码，双闹钟 |
-| `Hardware/Font.c/h` | 129 | 7 段数码管字体 + 二进制时间渲染 |
-| `Hardware/Button.c/h` | 130 | 按键去抖 + 长短按检测（HAL_GetTick 计时） |
-| `Hardware/Sleep.c/h` | 59 | 30s 无操作进 STOP 休眠，EXTI 唤醒 |
-| `Hardware/Buzzer.c/h` | 51 | 蜂鸣器控制，定时自动关断 |
-| `Hardware/Apps.c/h` | 41 | 首页渲染 + 闹钟响铃页 |
-| `Core/Src/main.c` | 219 | 主程序入口，外设初始化，主循环 |
+| `Hardware/Menu.c/h` | 565+45 | 页面状态机、菜单系统、个性化设置及持久化 |
+| `Hardware/OLED.c/h` | 432+41 | SSD1315 显示驱动，双缓冲渲染 |
+| `Hardware/DS3231.c/h` | 169+52 | RTC 驱动，BCD 编解码，双闹钟完整读写 |
+| `Hardware/Font.c/h` | 119+10 | 7 段数码管字体 + 二进制时间渲染 |
+| `Hardware/Button.c/h` | 104+26 | 按键去抖 + 长短按检测（真实时间计时） |
+| `Hardware/Sleep.c/h` | 47+12 | 30s 无操作进 STOP 休眠，EXTI 唤醒 |
+| `Hardware/Buzzer.c/h` | 38+13 | 蜂鸣器控制，定时自动关断 |
+| `Hardware/Apps.c/h` | 29+12 | 首页渲染 + 闹钟响铃页 |
+| `Core/Src/main.c` | 219 | 主程序入口，外设初始化，10ms 主循环 |
 | `Core/Src/stm32f1xx_it.c` | 233 | EXTI 中断处理，DS3231 闹钟回调 |
-| `Core/Src/gpio.c` | 95 | GPIO 引脚初始化 |
+| `Core/Src/gpio.c` | 95 | GPIO 引脚初始化（含按键、蜂鸣器、中断） |
 | `CMakeLists.txt` | 78 | CMake 构建配置 |
 
 ---

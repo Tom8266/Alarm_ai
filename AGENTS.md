@@ -4,10 +4,11 @@
 
 STM32F103C8Tx ("Blue Pill") embedded firmware for an alarm clock with:
 - **DS3231** RTC module (I2C addr: `0xD0`) — timekeeping, alarm, temperature
-- **SSD1315** 128x64 OLED display (I2C addr: `0x78`) — custom 7-segment-style digital clock UI
+- **SSD1315** 128×64 OLED display (I2C addr: `0x78`) — 7-segment-style clock, menu UI
+- **4 buttons** (UP/DOWN/LEFT/RIGHT) — navigation, long-press detection via polling
+- **Active buzzer** on PA1 — alarm sound, auto-shutoff
 - **I2C1** bus: PB6 (SCL), PB7 (SDA) @ 400kHz
-- **PA1** GPIO output
-- C11, bare-metal, no RTOS
+- C11, bare-metal super loop, no RTOS
 
 ## Build Commands
 
@@ -20,9 +21,6 @@ cmake --build --preset Debug
 
 # Release
 cmake --preset Release && cmake --build --preset Release
-
-# Alternative toolchain (starm-clang LLVM)
-# Edit CMakePresets.json to point toolchainFile at cmake/starm-clang.cmake
 ```
 
 **Prerequisites:** `arm-none-eabi-` toolchain on PATH; Ninja generator.
@@ -30,74 +28,193 @@ cmake --preset Release && cmake --build --preset Release
 ## Code Organization
 
 ```
-├── Core/                      # STM32CubeMX generated (DO NOT TOUCH outside USER CODE blocks)
-│   ├── Inc/                   #   Headers (gpio.h, i2c.h, main.h, ...)
-│   └── Src/                   #   Sources (main.c, i2c.c, gpio.c, stm32f1xx_it.c, ...)
-├── Hardware/                  # USER-CODE — custom application & peripheral drivers
-│   ├── OLED.c / OLED.h        #   SSD1315 display driver
-│   ├── DS3231.c / DS3231.h    #   RTC driver
-│   ├── Apps.c / Apps.h        #   Application logic (home screen UI)
-├── Drivers/                   # STM32 HAL + CMSIS (generated, read-only)
-├── cmake/                     # CMake toolchain files + CubeMX sub-build
-│   ├── gcc-arm-none-eabi.cmake
-│   ├── starm-clang.cmake
-│   └── stm32cubemx/CMakeLists.txt
-├── CMakeLists.txt             # Root build file (user-editable)
-├── CMakePresets.json          # Ninja + Debug/Release presets
-├── STM32F103XX_FLASH.ld       # Linker script (64KB flash, 20KB RAM)
-└── startup_stm32f103xb.s      # Reset vector / startup assembly
+├── Core/                        # STM32CubeMX generated (DO NOT TOUCH outside USER CODE blocks)
+│   ├── Inc/                     #   Headers (main.h, gpio.h, i2c.h, ...)
+│   └── Src/                     #   Sources (main.c, gpio.c, i2c.c, stm32f1xx_it.c, ...)
+├── Hardware/                    # USER-CODE — custom application & peripheral drivers
+│   ├── OLED.c / OLED.h          #   SSD1315 display driver (framebuffer + primitives)
+│   ├── DS3231.c / DS3231.h      #   RTC driver (time, alarm, temperature, BCD i/o)
+│   ├── Apps.c / Apps.h          #   Global state + home screen / alarm ringing UI
+│   ├── Font.c / Font.h          #   7-segment & binary time rendering
+│   ├── Button.c / Button.h      #   Debounced button driver (short/long press)
+│   ├── Buzzer.c / Buzzer.h      #   Buzzer with timed auto-shutoff
+│   ├── Menu.c / Menu.h          #   Page state machine + all menu/settings UIs
+│   └── Sleep.c / Sleep.h        #   STOP-mode sleep (30s idle timeout)
+├── Drivers/                     # STM32 HAL + CMSIS (generated, read-only)
+├── cmake/                       # CMake toolchain files + CubeMX sub-build
+├── CMakeLists.txt               # Root build (user-editable; add .c paths here)
+├── CMakePresets.json            # Ninja + Debug/Release presets
+├── STM32F103XX_FLASH.ld         # Linker script (64KB flash, 20KB RAM)
+└── startup_stm32f103xb.s        # Reset vector / startup assembly
 ```
+
+## Architecture & Control Flow
+
+### Main Loop (`Core/Src/main.c`)
+
+Super loop with 10ms tick-based tasks:
+
+```
+HAL_Init → SystemClock_Config → MX_GPIO_Init → MX_I2C1_Init
+→ DS3231_Init, SSD1315_Init, Button_Init, Buzzer_Init, Menu_Init
+→ SSD1315_Update (initial blank)
+
+while(1):
+  every 10ms:
+    if !sleeping:
+      Button_TimerHandler()    # poll & debounce buttons
+      Sleep_IdleTimerHandler() # accumulate idle time
+    Buzzer_TimerHandler()      # check auto-shutoff regardless of sleep
+
+  if Alarm_Triggered:
+    → Buzzer_StartAlarm(30000), Page_Set(PAGE_ALARM_RINGING)
+
+  if !sleeping:
+    Page_Process()             # handle button events for current page
+    SSD1315_Clear()            # reset framebuffers & OLED addressing
+    Page_Draw()                # draw to GRAM, calls SSD1315_Update() at end
+```
+
+### System State Machine
+
+```
+HOME ──(any long press 2s)──→ MENU ──→ Alarm List ──→ Alarm1/2 Set ──→ HOME
+  │                              ├──→ Time Set ──→ HOME
+  │                              └──→ Appearance ──→ HOME
+  │
+  └──(30s idle)──→ SLEEP ──(any EXTI / alarm)──→ HOME (wake, re-init OLED)
+  │
+  └──(DS3231 alarm INT)──→ RINGING ──(any key)──→ HOME
+```
+
+**Crucial detail:** Sleep pages (`SLEEP` / `RINGING`) skip `Page_Draw()` — the OLED stays off during sleep; during ringing, `Page_Draw()` handles its own UI.
+
+### Page System (`Hardware/Menu.c`)
+
+`Page_ID` enum defines all screens: `PAGE_HOME`, `PAGE_MENU`, `PAGE_ALARM_LIST`, `PAGE_ALARM1_SET`, `PAGE_ALARM2_SET`, `PAGE_TIME_SET`, `PAGE_APPEARANCE`, `PAGE_ALARM_RINGING`.
+
+Each page has a handler pair: `Page_Draw*()` + `Page_Process*()` dispatched via `switch` in `Page_Draw()`/`Page_Process()`. Button events are consumed (one-shot) via `Button_GetEvent()` which returns and clears the event.
+
+**UI navigation convention:** LEFT = back/save, RIGHT = enter/edit toggle, UP/DOWN = navigate or increment/decrement.
+
+### Appearance Settings Persistence
+
+Appearance settings (`bar_style`, `home_style`) are saved to the **last flash page at `0x0800FC00`** (1024-byte page). A magic number `0xA55A` validates the data. Config is loaded at boot via `Settings_Load()` and written on change via `Settings_Save()` (erases page, programs two halfwords). The `CFG_MAGIC` sits at offset 0; bar style at offset 2, home style at offset 3.
+
+### Pin Assignments
+
+Defined in `Core/Inc/gpio.h` (USER CODE section):
+
+| Pin  | Symbol            | Function         | Config                     |
+|------|-------------------|------------------|----------------------------|
+| PA0  | `BUTTON_UP`       | Button UP        | Pull-up input, EXTI fall   |
+| PA1  | —                 | Buzzer           | Push-pull output (HIGH=on) |
+| PA2  | `BUTTON_DOWN`     | Button DOWN      | Pull-up input, EXTI fall   |
+| PA4  | `BUTTON_LEFT`     | Button LEFT      | Pull-up input, EXTI fall   |
+| PA6  | `BUTTON_RIGHT`    | Button RIGHT     | Pull-up input, EXTI fall   |
+| PB6  | —                 | I2C1 SCL         | 400kHz                     |
+| PB7  | —                 | I2C1 SDA         | 400kHz                     |
+| PB10 | `ALARM_INT`       | DS3231 INT/SQW   | Pull-up input, EXTI fall   |
+
+### Interrupts
+
+`HAL_GPIO_EXTI_Callback` is overridden in `stm32f1xx_it.c` (USER CODE). On `ALARM_INT_Pin`, it sets `Alarm_Triggered = 1` (defined in `Apps.c`). The main loop polls this flag. All button EXTI interrupts are handled via polling in `Button_TimerHandler()`, not in the ISR (buttons use GPIO polling, EXTI is only for DS3231 and sleep wakeup).
+
+### Sleep/Wake (`Hardware/Sleep.c`)
+
+- Idle timeout: **30 seconds** (not 1 minute). Accumulated via `Sleep_IdleTimerHandler()` called every 10ms.
+- Enter: `SSD1315_WriteCommand(0xAE)` to turn off OLED, then `HAL_PWR_EnterSTOPMode()` with WFI.
+- Wake: EXTI from any button or DS3231 alarm triggers wake. After wake: `HAL_ResumeTick()`, re-call `SystemClock_Config()` (required after STOP), re-init OLED with `SSD1315_WriteCommand(0xAF)` + `SSD1315_Init()`.
+- `SystemClock_Config()` is a static function in `main.c` — `Sleep.c` accesses it via `extern void SystemClock_Config(void)`.
 
 ## Critical Patterns & Gotchas
 
 ### STM32CubeMX Generated Code (`Core/`, `Drivers/`)
 - Files have `USER CODE BEGIN` / `USER CODE END` markers. **Only add code between these markers.** Regeneration preserves them; everything else gets overwritten.
-- To regenerate: open `test.ioc` in STM32CubeMX and regenerate. The build expects `cmake/stm32cubemx/` layout.
+- Build system: the root `CMakeLists.txt` calls `add_subdirectory(cmake/stm32cubemx)` which builds the CubeMX-generated `stm32cubemx` static library.
 
 ### OLED Driver (`Hardware/OLED.c`)
-- **Dual framebuffer model:** `Background_GRAM[8][128]` stores a clean copy, `GRAM[8][128]` is the active buffer.
-- `SSD1315_Update()` pushes GRAM to the display; `SSD1315_Clear()` resets both buffers.
-- **Bug in `SSD1315_Clear()`:** The first `memset` targets `GRAM` but uses `sizeof(Background_GRAM)` — it's line `memset(GRAM, 0, sizeof(Background_GRAM))` when it should be `memset(Background_GRAM, 0, sizeof(Background_GRAM))`. This means `Background_GRAM` is **never cleared** (both memsets operate on GRAM).
-- `SSD1315_ShowNumber()` only supports **2-digit numbers** (limitation by design).
-- Main loop pattern: `App_Home()` draws to GRAM → `SSD1315_Update()` sends to display → `SSD1315_Clear()` resets for next frame.
+
+- **Dual framebuffer model:** `Background_GRAM[8][128]` maintains a clean state, `GRAM[8][128]` is the active buffer used for drawing and display.
+- `SSD1315_Clear()` zeroes both buffers and repositions the OLED column pointer. It does **not** update the display — call `SSD1315_Update()` after drawing.
+- `SSD1315_Update()` sends the full 8-page GRAM to the display in one pass.
+- **`SSD1315_ShowNumber()` only supports 2-digit numbers** (0-99). The comment in the source acknowledges this limitation.
+- Drawing primitives (`SSD1315_DrawRectangle`, `SSD1315_InvertRectangle`, etc.) operate on `GRAM` but also mirror to `Background_GRAM` (for XOR-style inversion support).
+- The display uses a 6×8 pixel font (size 1) and 8×16 pixel font (size 2). Both are stored as large lookup tables `ANSIFont68` and `ANSIFont816` directly in the .c file.
+- `SSD1315_Init()` does a full init sequence: close display, set clock, multiplex, COM config, charge pump, pre-charge, VCOMH, contrast, scroll disable, addressing mode, then finally open display and clear.
 
 ### DS3231 RTC Driver (`Hardware/DS3231.c`)
-- Uses BCD encoding internally; `BCD_To_Dec()` / `Dec_To_BCD()` helpers convert for/from human-readable values.
-- Alarm mask bits are set/cleared with `0x80` on the minute/second register to disable/enable.
-- `Alarm_TypeDef` stores only minute, hour, and state — seconds are forced to 0.
-- `DS3231_Init()` enables the oscillator (control reg bit 2), disables 32kHz output (status reg bits 0-1 cleared, bits 2-7 masked), and configures INT output.
 
-### Application (`Hardware/Apps.c`)
-- `App_Home()` is the main UI function — called in the super loop.
-- Draws a 7-segment-style digital clock using rectangle primitives (`DigitalTubeStyle_ShowTime()`).
-- Uses hardcoded position constants (`Start_X=18`, `Start_Y=19`, `Middle_Offset=15`, `Number_Offset=2`, `Tube_Length=12`, `Tube_Width=2`).
-- Flashing colon dots toggle every second (`Time.Second % 2`).
-- Bottom banner: "Nothing is impossible" at row 54.
+- Uses BCD encoding internally; `BCD_To_Dec()` / `Dec_To_BCD()` convert at the driver boundary.
+- `DS3231_Init()` enables oscillator, alarm interrupt (INTCN + A1IE), and disables 32kHz output.
+- `Alarm_TypeDef` fields: Second (Alarm1 only), Minute, Hour, Day, Repeat (Daily/Date/Weekday), State (Enable/Disable).
+- Alarm disable: all match bits (A1M1-A1M4 or A2M2-A2M4) set to 1 = Disable; State flag derived from this at read time.
+- `DS3231_ClearAlarmFlag()` clears both A1F and A2F bits in the status register.
+
+### Button Driver (`Hardware/Button.c`)
+
+- **Polled, no ISR.** `Button_TimerHandler()` called every 10ms.
+- Debounce: counter increments in 10ms steps up to 20ms (`DEBOUNCE_MS = 20`). State is considered stable after 20ms of consistent raw reading.
+- Short press: released before `LONG_PRESS_MS` (2000ms).
+- Long press: detected at release time if pressed ≥ 2000ms. Note: long press fires on **release**, not after holding 2s.
+- `Button_GetEvent()` returns the pending event and clears it (one-shot consumption pattern).
+- `Button_GetMaxPressMs()` returns the longest current press duration across all buttons — used for the HOME page progress bar animation.
+
+### Buzzer Driver (`Hardware/Buzzer.c`)
+
+- Active buzzer on PA1: `HAL_GPIO_WritePin` HIGH=on, LOW=off.
+- `Buzzer_StartAlarm(duration_ms)` starts buzzing and arms an auto-shutoff timer.
+- `Buzzer_TimerHandler()` (10ms) decrements the counter; when expired, turns off buzzer.
+- **Timer handler runs even during sleep** — so alarm auto-shutoff works during RINGING state.
+
+### Menu & UI (`Hardware/Menu.c`)
+
+- **Each page's Process function runs every 10ms loop iteration.** Button events are consumed; if no button was pressed, `Button_GetEvent()` returns `BTN_NONE` and the page handler takes no action.
+- **Editing mode convention:** RIGHT toggles `editing` flag. In browsing mode (`editing == 0`), UP/DOWN move cursor between fields. In editing mode (`editing == 1`), UP/DOWN modify the selected value.
+- **Alarm editing:** The step count and label ordering is dynamic — Alarm1 has an extra "Sec" field; the "Day" field only appears if `Repeat != ALARM_DAILY`; "State" is always last. `Alarm_StepCount()` and `Alarm_StepLabel()` manage this complexity.
+- `Settings_Save()` disables IRQs during flash operations (erase + program).
+
+### Font Rendering (`Hardware/Font.c`)
+
+- `Font_Draw7SegTime()`: Renders a 7-segment-style digital clock at coordinates (`x`, `y`). Each digit is composed of 7 rectangle segments (A-G). Colon dots flash based on `time->Second & 1`.
+- `Font_DrawBinaryTime()`: Renders hour and minute as two rows of 8-bit binary squares (11×11 px each, centered).
+- Segment size constants: `SEG_LEN=12`, `SEG_WID=2`, `MID_GAP=15` (extra gap between HH and MM), `NUM_GAP=2`.
+
+### SSD1315 InvertRectangle
+
+`SSD1315_InvertRectangle()` toggles (XORs) pixels — it does NOT just set to white. This means:
+- Drawing an invert rectangle over a black area turns it white.
+- Drawing the same invert rectangle AGAIN restores the original content.
+- PRESSING an invert rectangle on white content turns it black.
+- Used for cursor/selection highlighting in menus — self-resetting.
 
 ### Naming Conventions
-| Prefix | Used for |
-|--------|----------|
-| `SSD1315_` | OLED display driver functions |
-| `DS3231_` | RTC driver functions |
-| `App_` | Application-level functions |
-| `MX_` | CubeMX-generated peripheral init functions |
-| `HAL_` | STM32 HAL library functions |
-| Types: `_TypeDef` suffix, enums: PascalCase members |
+
+| Prefix         | Used for                                     |
+|----------------|----------------------------------------------|
+| `SSD1315_`     | OLED display driver functions                |
+| `DS3231_`      | RTC driver functions                         |
+| `App_`         | Application-level UI functions (Home, Alarm) |
+| `Button_`      | Button driver                                |
+| `Buzzer_`      | Buzzer driver                                |
+| `Font_`        | Font/rendering helpers                       |
+| `Page_`        | Menu page state machine                      |
+| `Sleep_`       | Sleep mode management                        |
+| `MX_`          | CubeMX-generated peripheral init functions   |
+| `HAL_`         | STM32 HAL library                            |
+
+Types use `_TypeDef` suffix. Enums use PascalCase members.
 
 ### I2C Details
 - Both DS3231 (`0xD0` write / `0xD1` read) and SSD1315 (`0x78` write / `0x79` read) share I2C1.
-- SSD1315 uses command address `0x00` and data address `0x40` for memory-mapped I2C writes.
-- DS3231 uses memory addressing mode (register address byte + data).
-
-### Threading / Concurrency
-- **No RTOS** — bare-metal super loop in `main.c`.
-- Interrupts handled by STM32 HAL (systick for `HAL_Delay`, I2C IRQs if used).
-- `Error_Handler()` disables IRQs and halts.
+- SSD1315 uses memory-mapped I2C writes with command address `0x00` and data address `0x40`.
+- DS3231 uses standard register-address + data I2C memory transfers.
+- All I2C transactions have a 100ms timeout.
 
 ### Linker
 - 64KB flash, 20KB RAM (STM32F103C8Tx).
 - `--gc-sections` enabled; unused functions are stripped.
-- Calls `--print-memory-usage` during link.
+- Flash page size: 1KB (1024 bytes), last page `0x0800FC00` used for config storage.
 
 ## ⚠️ 驱动文件不可修改
 
@@ -105,55 +222,14 @@ cmake --preset Release && cmake --build --preset Release
 - `Hardware/OLED.c` / `OLED.h`
 - `Hardware/DS3231.c` / `DS3231.h`
 
-这些驱动虽然有些代码看起来不太好理解（比如奇怪的命名、硬编码的魔法数字、不够优雅的实现），但已经过实际硬件测试验证，能稳定工作。**不要因为"看着不舒服"就去重构它们。**
+这些驱动已经过实际硬件测试验证，能稳定工作。**不要因为"看着不舒服"就去重构它们。**
 
-如果想改动，必须满足以下条件之一：
-1. 明确的新功能需求（比如增加对 OLED 新指令的支持、DS3231 闹钟的新模式等）
-2. 证实了实际运行时触发的 bug（而不是代码审查觉得"可能有问题"）
+可以改动的情况：
+1. 有新功能需求（如新 OLED 指令支持、DS3231 新闹钟模式）
+2. 实际运行时触发的 bug（而非代码审查猜测的潜在问题）
 
----
+## Adding New Hardware Drivers
 
-## New Hardware Drivers
-- Place source files in `Hardware/` directory.
-- Add `.c` files to `target_sources()` in root `CMakeLists.txt` (line ~47).
-- Add include paths to `target_include_directories()` in `CMakeLists.txt` (line ~55).
-
----
-
-## 新增功能结构 (2026-05)
-
-### 引脚分配
-| 引脚 | 功能 | 配置 |
-|------|------|------|
-| PA0 | 按键 UP | 上拉输入，下降沿 EXTI |
-| PA2 | 按键 DOWN | 上拉输入，下降沿 EXTI |
-| PA4 | 按键 LEFT | 上拉输入，下降沿 EXTI |
-| PA6 | 按键 RIGHT | 上拉输入，下降沿 EXTI |
-| PA1 | 有源蜂鸣器 | 推挽输出（拉高响） |
-| PB10 | DS3231 中断输入 | 上拉输入，下降沿 EXTI |
-| PB6/PB7 | I2C1 | 400kHz (已有) |
-
-### 系统状态机
-```
-HOME ──(LEFT长按2s)──→ MENU ──── 闹钟设置 ──→ HOME
-  │                       └──── 时间设置 ──→ HOME
-  │
-  └──(1min无操作)──→ SLEEP ──(任意按键/闹钟)──→ HOME
-                       │
-                       └──(DS3231闹钟)──→ RINGING ──(任意按键)──→ HOME
-```
-
-### 新增文件 (`Hardware/`)
-- **`Button.c/h`** — 按键驱动，10ms 轮询去抖，支持短按/长按(2s松手)检测
-- **`Buzzer.c/h`** — 蜂鸣器驱动，支持定时自动关断（如闹钟响30s）
-- **`Menu.c/h`** — 页面状态机 + 目录菜单 + 闹钟/时间设置界面
-- **`Sleep.c/h`** — 休眠管理：1min 无操作进入 STOP 模式（OLED 关），EXTI 唤醒
-
-### 中断
-- `HAL_GPIO_EXTI_Callback` 在 `stm32f1xx_it.c` 中覆盖，DS3231 中断时设置 `Alarm_Triggered` 标志
-- 所有 EXTI 优先级设为 15（最低，避免影响 HAL 滴答定时器）
-
-### 注意事项
-- `SystemClock_Config()` 定义在 `main.c` 中静态函数，`Sleep.c` 通过 `extern` 声明调用
-- 休眠唤醒后需要重新配置系统时钟（HAL 要求）
-- 主循环 10ms 定时任务由 `HAL_GetTick()` 差值控制
+1. Place `.c` + `.h` files in `Hardware/`
+2. Add `.c` files to `target_sources()` in root `CMakeLists.txt` (~line 47)
+3. Add `Hardware` to `target_include_directories()` if not already present (~line 60)
