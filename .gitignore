@@ -1,0 +1,7 @@
+build/
+*.elf
+*.map
+*.su
+*.o
+*.d
+.idea/
