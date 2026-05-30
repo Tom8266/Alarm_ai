@@ -6,7 +6,7 @@ STM32F103C8Tx ("Blue Pill") embedded firmware for an alarm clock with:
 - **DS3231** RTC module (I2C addr: `0xD0`) — timekeeping, alarm, temperature
 - **SSD1315** 128×64 OLED display (I2C addr: `0x78`) — 7-segment-style clock, menu UI
 - **4 buttons** (UP/DOWN/LEFT/RIGHT) — navigation, long-press detection via polling
-- **Active buzzer** on PA1 — alarm sound, auto-shutoff
+- **Active buzzer** on PB0 — alarm sound, auto-shutoff (LOW=on, HIGH=off, needs transistor)
 - **I2C1** bus: PB6 (SCL), PB7 (SDA) @ 400kHz
 - C11, bare-metal super loop, no RTOS
 
@@ -87,7 +87,7 @@ HOME ──(any long press 2s)──→ MENU ──→ Alarm List ──→ Alar
   └──(DS3231 alarm INT)──→ RINGING ──(any key)──→ HOME
 ```
 
-**Crucial detail:** Sleep pages (`SLEEP` / `RINGING`) skip `Page_Draw()` — the OLED stays off during sleep; during ringing, `Page_Draw()` handles its own UI.
+**Crucial detail:** During sleep (`Sleep_IsActive() == 1`), the entire `Page_Process()` / `Page_Draw()` block is skipped — the OLED is off. During RINGING, sleep is NOT active, so `Page_Process()` and `Page_Draw()` both run normally; `Page_Draw()` dispatches to `App_AlarmRinging()` which handles its own flashing UI. Note: `SLEEP` is not a `Page_ID` — it's a boolean flag managed by `Sleep.c`, not part of the page state machine.
 
 ### Page System (`Hardware/Menu.c`)
 
@@ -95,7 +95,13 @@ HOME ──(any long press 2s)──→ MENU ──→ Alarm List ──→ Alar
 
 Each page has a handler pair: `Page_Draw*()` + `Page_Process*()` dispatched via `switch` in `Page_Draw()`/`Page_Process()`. Button events are consumed (one-shot) via `Button_GetEvent()` which returns and clears the event.
 
+**`Page_Set()` side effects:** Calling `Page_Set()` always resets `menu_selection = 0`, `progress_width = 0`, `press_was_active = 0`, and calls `Sleep_ResetIdleTimer()`. This means switching pages always clears the navigation cursor and resets the idle counter.
+
+**`TimeStyle` enum** (`TIME_STYLE_DIGITAL`, `TIME_STYLE_TEXT`) is defined in `Menu.h` but **currently unused** anywhere in the codebase. Don't add features based on it unless intentionally implementing that setting.
+
 **UI navigation convention:** LEFT = back/save, RIGHT = enter/edit toggle, UP/DOWN = navigate or increment/decrement.
+
+**HOME page progress bar:** Holding any button triggers a progress bar animation. `Button_GetMaxPressMs()` returns the longest current press duration across all buttons. After 200ms of press, the bar appears and grows from 0→128px as press time approaches 2000ms (linear mapping). On release, the bar decays at ~6px per 10ms frame. If the bar reaches full width (128px = 2s hold), `Page_Process()` detects a long-press event and transitions to `PAGE_MENU`. The bar has two visual styles: `BAR_STYLE_BAR` (border + inverted-fill rectangle at y=50) and `BAR_STYLE_FULLSCREEN` (full-screen inverted rectangle).
 
 ### Appearance Settings Persistence
 
@@ -140,10 +146,23 @@ Defined in `Core/Inc/gpio.h` (USER CODE section):
 - **Dual framebuffer model:** `Background_GRAM[8][128]` maintains a clean state, `GRAM[8][128]` is the active buffer used for drawing and display.
 - `SSD1315_Clear()` zeroes both buffers and repositions the OLED column pointer. It does **not** update the display — call `SSD1315_Update()` after drawing.
 - `SSD1315_Update()` sends the full 8-page GRAM to the display in one pass.
-- **`SSD1315_ShowNumber()` only supports 2-digit numbers** (0-99). The comment in the source acknowledges this limitation.
-- Drawing primitives (`SSD1315_DrawRectangle`, `SSD1315_InvertRectangle`, etc.) operate on `GRAM` but also mirror to `Background_GRAM` (for XOR-style inversion support).
+- **`SSD1315_ShowNumber()` only supports 2-digit numbers** (0-99). The implementation hardcodes `str[3]` with two decimal digits.
+- Drawing primitives (`SSD1315_DrawRectangle`, etc.) operate on **both** `GRAM` and `Background_GRAM` simultaneously — every pixel write mirrors to both buffers.
+- `SSD1315_DrawRectangle` with `Color=White` fills a solid rectangle. With `Color=Black` it draws an unfilled **outline** (border only) — this is non-obvious.
 - The display uses a 6×8 pixel font (size 1) and 8×16 pixel font (size 2). Both are stored as large lookup tables `ANSIFont68` and `ANSIFont816` directly in the .c file.
 - `SSD1315_Init()` does a full init sequence: close display, set clock, multiplex, COM config, charge pump, pre-charge, VCOMH, contrast, scroll disable, addressing mode, then finally open display and clear.
+
+### SSD1315_InvertRectangle — Critical Behavior
+
+`SSD1315_InvertRectangle()` does **NOT** simply XOR pixels. The actual sequence is:
+1. **Restore** `GRAM` from `Background_GRAM` (resetting any previous inversion)
+2. **Then XOR** the specified rectangle region on `GRAM`
+
+This means:
+- **Only ONE inverted region can exist at a time** — calling it again restores the previous one
+- It is used for cursor/selection highlighting in menus — each frame redraws content, then applies one highlight
+- The effect is self-resetting: if you stop calling it, the normal content reappears on the next `SSD1315_Clear()` + redraw cycle
+- `SSD1315_CleanDrawRectangle()` makes an inversion permanent by copying `GRAM` back to `Background_GRAM` after inverting
 
 ### DS3231 RTC Driver (`Hardware/DS3231.c`)
 
@@ -168,6 +187,7 @@ Defined in `Core/Inc/gpio.h` (USER CODE section):
 - `Buzzer_StartAlarm(duration_ms)` starts buzzing and arms an auto-shutoff timer.
 - `Buzzer_TimerHandler()` (10ms) decrements the counter; when expired, turns off buzzer.
 - **Timer handler runs even during sleep** — so alarm auto-shutoff works during RINGING state.
+- `Buzzer_On()`, `Buzzer_Off()`, `Buzzer_Toggle()` are low-level helpers available but **not used by the main app** — the app only uses `Buzzer_StartAlarm()`. Similarly, `Button_IsAnyPressed()` exists but isn't called in the current main loop.
 
 ### Menu & UI (`Hardware/Menu.c`)
 
@@ -175,20 +195,14 @@ Defined in `Core/Inc/gpio.h` (USER CODE section):
 - **Editing mode convention:** RIGHT toggles `editing` flag. In browsing mode (`editing == 0`), UP/DOWN move cursor between fields. In editing mode (`editing == 1`), UP/DOWN modify the selected value.
 - **Alarm editing:** The step count and label ordering is dynamic — Alarm1 has an extra "Sec" field; the "Day" field only appears if `Repeat != ALARM_DAILY`; "State" is always last. `Alarm_StepCount()` and `Alarm_StepLabel()` manage this complexity.
 - `Settings_Save()` disables IRQs during flash operations (erase + program).
+- **Appearance saves on every toggle** — `Settings_Save()` is called immediately when a style is changed in the Appearance page.
+- **Alarm saves on LEFT (back)** — `DS3231_WriteAlarm()` is called when leaving the alarm set page, not on each edit.
 
 ### Font Rendering (`Hardware/Font.c`)
 
 - `Font_Draw7SegTime()`: Renders a 7-segment-style digital clock at coordinates (`x`, `y`). Each digit is composed of 7 rectangle segments (A-G). Colon dots flash based on `time->Second & 1`.
 - `Font_DrawBinaryTime()`: Renders hour and minute as two rows of 8-bit binary squares (11×11 px each, centered).
 - Segment size constants: `SEG_LEN=12`, `SEG_WID=2`, `MID_GAP=15` (extra gap between HH and MM), `NUM_GAP=2`.
-
-### SSD1315 InvertRectangle
-
-`SSD1315_InvertRectangle()` toggles (XORs) pixels — it does NOT just set to white. This means:
-- Drawing an invert rectangle over a black area turns it white.
-- Drawing the same invert rectangle AGAIN restores the original content.
-- PRESSING an invert rectangle on white content turns it black.
-- Used for cursor/selection highlighting in menus — self-resetting.
 
 ### Naming Conventions
 

@@ -20,11 +20,6 @@ typedef enum {
 } BarStyle;
 
 typedef enum {
-    TIME_STYLE_DIGITAL = 0,
-    TIME_STYLE_TEXT
-} TimeStyle;
-
-typedef enum {
     HOME_STYLE_CLOCK = 0,
     HOME_STYLE_BINARY
 } HomeStyle;
