@@ -1,12 +1,6 @@
-./CLAUDE.md
+CLAUDE.md
 
 build/
 
-*.o
-*.elf
-*.bin
-*.hex
-  
 .mxproject
 
-CLAUDE.md
